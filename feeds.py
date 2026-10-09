@@ -190,6 +190,7 @@ def msg_boosty(p):
 FEEDS = [('youtube', youtube, msg_video, 'WEBHOOK_VIDEOS'),
          ('releases', releases, msg_release, 'WEBHOOK_RELEASES'),
          ('boosty', boosty, msg_boosty, 'WEBHOOK_NEWS')]
+ZONE_KIND = {'youtube': 'video', 'releases': 'release', 'boosty': 'boosty'}
 
 
 def main():
@@ -214,12 +215,23 @@ def main():
             for item in reversed(fresh):  # oldest first, so the channel reads in order
                 print('%s: new %s' % (key, item['id']))
                 post(hook, make(item))
+                if not DRY:
+                    try:
+                        import lyla_schedule
+                        lyla_schedule.zone_news(ZONE_KIND[key], item)
+                    except Exception as e:  # the zones are a bonus; the main channel already has it
+                        print('  zones failed:', e)
                 seen.append(item['id'])
                 time.sleep(1)
             if not fresh:
                 print('%s: nothing new' % key)
         if not DRY:
             state[key] = seen[-300:]
+    try:
+        import lyla_schedule
+        lyla_schedule.run(state, dry=DRY)
+    except Exception as e:
+        print('lyla schedule failed:', e)
     # a monthly touch keeps GitHub from switching the schedule off in a quiet repo
     month = datetime.date.today().strftime('%Y-%m')
     if not DRY and state.get('heartbeat') != month:
