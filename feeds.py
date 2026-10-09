@@ -33,6 +33,19 @@ def get(url, headers=None, raw=False):
     return data if raw else json.loads(data)
 
 
+def crosspost(msg):
+    """Publish a message in an announcement channel, so servers following it get it too (needs the bot token)."""
+    token = os.environ.get('DISCORD_BOT_TOKEN', '').strip()
+    if not token or not msg or not msg.get('id'):
+        return
+    req = urllib.request.Request('https://discord.com/api/v10/channels/%s/messages/%s/crosspost' % (msg['channel_id'], msg['id']),
+                                 data=b'', method='POST', headers={**UA, 'Authorization': 'Bot ' + token})
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+    except urllib.error.HTTPError as e:
+        print('  crosspost failed:', e.code, e.read()[:200])
+
+
 def post(webhook, payload):
     if DRY or not webhook:
         print('  [dry]' if DRY else '  [no webhook]', json.dumps(payload, ensure_ascii=False)[:300])
@@ -41,7 +54,8 @@ def post(webhook, payload):
     for _ in range(5):
         req = urllib.request.Request(webhook + '?wait=true', data=body, headers={**UA, 'Content-Type': 'application/json'})
         try:
-            with urllib.request.urlopen(req, timeout=30):
+            with urllib.request.urlopen(req, timeout=30) as r:
+                crosspost(json.loads(r.read() or b'{}'))
                 return
         except urllib.error.HTTPError as e:
             if e.code == 429:
@@ -49,6 +63,26 @@ def post(webhook, payload):
                 continue
             raise
     raise RuntimeError('discord kept rate limiting')
+
+
+# LYLA, the Nueva York 2099 AI, announces everything; the line is picked by the item id so reruns say the same
+LINES = {
+    'video': ['📺 **LYLA:** Генри выпустил новое видео — бросай всё и смотри! | Genry just dropped a new video, drop everything!',
+              '🎬 **LYLA:** Свежий ролик с канала GenryTheFox. Лайк сам себя не поставит 😏 | Fresh video — that like won\'t click itself.',
+              '🍿 **LYLA:** Попкорн готов? Новое видео уже здесь! | Popcorn ready? New video is up!'],
+    'short': ['⚡ **LYLA:** Новый шортс, 60 секунд безумия! | New short — 60 seconds of madness!',
+              '⚡ **LYLA:** Короткий, но мощный. Новый шортс! | Short but deadly. New short!'],
+    'release': ['🛠️ **LYLA:** Свежая сборка прямо из лаборатории Генри! | Fresh build straight from Genry\'s lab!',
+                '📦 **LYLA:** Новый релиз! Качаем, тестим, кидаем баги в 🐞-каналы. | New release — download, test, report bugs!',
+                '🚀 **LYLA:** Обновление прилетело с GitHub. Алхимакс в шоке. | Update just landed. Alchemax is shaking.'],
+    'boosty': ['🗞️ **Daily Bugle 2099:** Новый пост на Бусти! | New Boosty post!',
+               '🗞️ **Daily Bugle 2099:** Экстренный выпуск — Генри опубликовал новое! | Breaking: Genry posted something new!'],
+}
+
+
+def line(kind, item_id):
+    options = LINES[kind]
+    return options[sum(map(ord, str(item_id))) % len(options)]
 
 
 def ping(name):
@@ -121,10 +155,8 @@ def boosty():
 # --- messages -----------------------------------------------------------------------------------------------------
 
 def msg_video(v):
-    kind = 'Новый шортс' if v['shorts'] else 'Новое видео'
-    kind_en = 'New short' if v['shorts'] else 'New video'
-    return {'username': 'GenryTheFox • YouTube', 'avatar_url': AVATAR, 'allowed_mentions': mentions('VIDEOS'),
-            'content': '%s🎬 **%s!** | **%s!**\n%s' % (ping('VIDEOS'), kind, kind_en, v['url'])}
+    return {'allowed_mentions': mentions('VIDEOS'),
+            'content': '%s%s\n%s' % (ping('VIDEOS'), line('short' if v['shorts'] else 'video', v['id']), v['url'])}
 
 
 def msg_release(r):
@@ -138,21 +170,21 @@ def msg_release(r):
     lines.append('🔗 [Страница релиза | Release page](%s)' % r['url'])
     embed = {'title': '📦 %s — %s' % (r['repo'], r['name'])[:250], 'url': r['url'], 'description': '\n'.join(lines)[:3900],
              'color': 0xF0A030 if r['pre'] else 0x3FB950, 'timestamp': r['when'],
-             'footer': {'text': 'GitHub • %s%s' % (r['tag'], ' • beta' if r['pre'] else '')}}
-    return {'username': 'GenryTheFox • Releases', 'avatar_url': AVATAR, 'allowed_mentions': mentions('RELEASES'),
-            'content': '%s📦 **Новый релиз!** | **New release!**' % ping('RELEASES'), 'embeds': [embed]}
+             'footer': {'text': 'GitHub • %s%s • LYLA 2099' % (r['tag'], ' • beta' if r['pre'] else '')}}
+    return {'allowed_mentions': mentions('RELEASES'),
+            'content': '%s%s' % (ping('RELEASES'), line('release', r['id'])), 'embeds': [embed]}
 
 
 def msg_boosty(p):
     embed = {'title': p['title'][:250], 'url': p['url'], 'description': (p['text'] + '\n\n' if p['text'] else '') +
              '🔑 Доступ: %s\n👉 [Читать на Бусти | Open on Boosty](%s)' % (p['access'], p['url']),
-             'color': 0xF15F2C, 'footer': {'text': 'Boosty • boosty.to/%s' % BOOSTY}}
+             'color': 0xF15F2C, 'footer': {'text': 'Daily Bugle 2099 • boosty.to/%s' % BOOSTY}}
     if p['when']:
         embed['timestamp'] = datetime.datetime.fromtimestamp(p['when'], datetime.timezone.utc).isoformat()
     if p['image']:
         embed['image'] = {'url': p['image']}
-    return {'username': 'GenryTheFox • Boosty', 'avatar_url': AVATAR, 'allowed_mentions': mentions('NEWS'),
-            'content': '%s📰 **Новый пост на Бусти!** | **New Boosty post!**' % ping('NEWS'), 'embeds': [embed]}
+    return {'allowed_mentions': mentions('NEWS'),
+            'content': '%s%s' % (ping('NEWS'), line('boosty', p['id'])), 'embeds': [embed]}
 
 
 FEEDS = [('youtube', youtube, msg_video, 'WEBHOOK_VIDEOS'),

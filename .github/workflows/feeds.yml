@@ -31,6 +31,7 @@ jobs:
           PING_VIDEOS: ${{ vars.PING_VIDEOS }}
           PING_RELEASES: ${{ vars.PING_RELEASES }}
           PING_NEWS: ${{ vars.PING_NEWS }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 feeds.py ${{ inputs.latest && '--latest' || '' }}
       - name: Save state
