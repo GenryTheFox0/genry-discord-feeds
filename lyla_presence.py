@@ -2,6 +2,8 @@
 and answers people who called her. Discord itself is the shared memory with the live bot on Genry's PC: if LYLA
 already answered or welcomed someone there, the robot sees it and stays quiet.
 """
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -85,36 +87,52 @@ def recent(channel, limit=50):
         return []
 
 
+def tag(uid):
+    """state.json lives in a public repo: members are kept as HMAC tags keyed by the bot token (a GitHub secret), never raw IDs."""
+    key = os.environ.get('DISCORD_BOT_TOKEN', '').strip().encode()
+    return hmac.new(key, str(uid).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def remember_all(state, ms, why):
+    state['welcomed'] = [tag(m['user']['id']) for m in ms]
+    state['thanked'] = ['%s:%s' % (tag(m['user']['id']), r) for m in ms for r in m['roles'] if r in TIER_ROLES.values()]
+    print('presence: remembered %d members (%s)' % (len(ms), why))
+
+
 def welcomes_and_thanks(state, dry):
     bot = CFG['bot_id']
     ms = [m for m in members() if not m['user'].get('bot')]
     seen = state.get('welcomed')
     thanked = state.get('thanked')
     if seen is None or thanked is None:  # first run: everyone already here counts as greeted
-        state['welcomed'] = [m['user']['id'] for m in ms]
-        state['thanked'] = ['%s:%s' % (m['user']['id'], r) for m in ms for r in m['roles'] if r in TIER_ROLES.values()]
-        print('presence: remembered %d members' % len(ms))
+        remember_all(state, ms, 'first run')
         return
-    seen, thanked = set(seen), set(thanked)
+    # old states kept raw IDs: convert them to tags in place
+    seen = {tag(x) if x.isdigit() else x for x in seen}
+    thanked = {('%s:%s' % (tag(x.split(':')[0]), x.split(':')[1])) if x.split(':')[0].isdigit() else x for x in thanked}
+    fresh = [m for m in ms if tag(m['user']['id']) not in seen and any(r in LANG_OF_ROLE for r in m['roles'])]
+    if len(fresh) > 15:  # nobody gets 15 newcomers in 15 minutes: the key changed, don't greet the whole server again
+        remember_all(state, ms, 'key changed, %d unknown' % len(fresh))
+        return
     zone_recent = {}
     for m in ms:
         uid = m['user']['id']
         lang = next((LANG_OF_ROLE[r] for r in m['roles'] if r in LANG_OF_ROLE), None)
-        if uid not in seen and lang:
+        if tag(uid) not in seen and lang:
             zone = CFG['zones'][lang]
             if zone['chat'] not in zone_recent:
                 zone_recent[zone['chat']] = recent(zone['chat'])
             if not any(x['author']['id'] == bot and uid in [u['id'] for u in x.get('mentions', [])] for x in zone_recent[zone['chat']]):
                 text = T.WELCOME[lang].format(who='<@%s>' % uid, start='<#%s>' % CFG['start'], news='<#%s>' % zone['news'],
                                              bugs='<#%s>' % zone['bugs'], boosty=T.BOOSTY)
-                print('presence: welcome', uid, lang)
+                print('presence: welcome', lang)          # Actions logs are public: no member IDs
                 if not dry:
                     say(zone['chat'], text, mention=uid)
-            seen.add(uid)
+            seen.add(tag(uid))
         for name, rid in TIER_ROLES.items():
-            key = '%s:%s' % (uid, rid)
+            key = '%s:%s' % (tag(uid), rid)
             if rid in m['roles'] and key not in thanked:
-                print('presence: thanks', uid, name)
+                print('presence: thanks', name)
                 if not dry:
                     say(CFG['global'], T.THANKS.format(who='<@%s>' % uid, tier=name, boosty=T.BOOSTY), mention=uid)
                 thanked.add(key)
