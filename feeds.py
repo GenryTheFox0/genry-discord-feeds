@@ -232,6 +232,11 @@ def main():
         lyla_schedule.run(state, dry=DRY)
     except Exception as e:
         print('lyla schedule failed:', e)
+    try:
+        import lyla_presence
+        lyla_presence.run(state, dry=DRY)
+    except Exception as e:
+        print('lyla presence failed:', e)
     # a monthly touch keeps GitHub from switching the schedule off in a quiet repo
     month = datetime.date.today().strftime('%Y-%m')
     if not DRY and state.get('heartbeat') != month:
