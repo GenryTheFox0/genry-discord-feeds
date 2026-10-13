@@ -193,6 +193,26 @@ FEEDS = [('youtube', youtube, msg_video, 'WEBHOOK_VIDEOS'),
 ZONE_KIND = {'youtube': 'video', 'releases': 'release', 'boosty': 'boosty'}
 
 
+# Only what came out lately is news. The feeds look at a window of the newest items, so when something newer is
+# deleted, an old one slides into the window and is not in the state -- 13.10.2026 the beta.3 update files were posted
+# as fresh after the Intel test release was removed. Anything older than this is remembered, never posted.
+MAX_AGE = datetime.timedelta(days=3)
+
+
+def too_old(item):
+    when = item.get('when')
+    try:
+        if isinstance(when, (int, float)):
+            moment = datetime.datetime.fromtimestamp(when, datetime.timezone.utc)
+        elif isinstance(when, str) and when:
+            moment = datetime.datetime.fromisoformat(when.replace('Z', '+00:00'))
+        else:
+            return False
+    except (ValueError, OverflowError, OSError):
+        return False
+    return datetime.datetime.now(datetime.timezone.utc) - moment > MAX_AGE
+
+
 def main():
     state = json.load(open(STATE, encoding='utf-8')) if os.path.exists(STATE) else {}
     for key, fetch, make, hook_env in FEEDS:
@@ -211,6 +231,10 @@ def main():
             print('%s: remembering %d items, nothing posted' % (key, len(items)))
             seen = [i['id'] for i in items] if seen is None else list(dict.fromkeys(seen + [i['id'] for i in items]))
         else:
+            stale = [i for i in items if i['id'] not in seen and too_old(i)]
+            for item in stale:
+                print('%s: old %s, remembered, not posted' % (key, item['id']))
+                seen.append(item['id'])
             fresh = [i for i in items if i['id'] not in seen]
             for item in reversed(fresh):  # oldest first, so the channel reads in order
                 print('%s: new %s' % (key, item['id']))
