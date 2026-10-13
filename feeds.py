@@ -165,7 +165,9 @@ def msg_release(r):
     if len(body) > 700:
         body = body[:700].rsplit('\n', 1)[0] + '\n…'
     lines = [body] if body else []
-    for name, size, url in r['assets'][:4]:
+    # GitHub lists assets by name; the installer goes first, checksums and the like last
+    assets = sorted(r['assets'], key=lambda a: (not a[0].lower().endswith('.exe'), a[0].lower().endswith(('.txt', '.json')), a[0].lower()))
+    for name, size, url in assets[:4]:
         lines.append('⬇️ [%s](%s) — %.1f MB' % (name, url, size / 1048576))
     lines.append('🔗 [Страница релиза | Release page](%s)' % r['url'])
     embed = {'title': '📦 %s — %s' % (r['repo'], r['name'])[:250], 'url': r['url'], 'description': '\n'.join(lines)[:3900],
