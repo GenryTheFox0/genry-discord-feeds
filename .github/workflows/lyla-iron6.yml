@@ -1,0 +1,40 @@
+name: LYLA - targeted Iron 6 release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published Project Iron 6 Beta 2.0.1 tag (v1.0.0-beta.2.0.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# Shared with discord-feeds: claim and all per-message checkpoints complete
+# before the normal scheduled feed can inspect the same state.json.
+concurrency:
+  group: feeds
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Configure state checkpoint identity
+        run: |
+          git config user.name "genry-feeds"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Announce the specified published Iron 6 release only
+        env:
+          TARGET_TAG: ${{ inputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBHOOK_RELEASES: ${{ secrets.WEBHOOK_RELEASES }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          PING_RELEASES: ${{ vars.PING_RELEASES }}
+        run: python3 lyla_iron6_release.py
+
